@@ -1,0 +1,367 @@
+{
+  "summary": {
+    "posture_score": 5,
+    "letter_grade": "F",
+    "counts": {
+      "CRITICAL": 5,
+      "HIGH": 2,
+      "MEDIUM": 3,
+      "LOW": 0
+    },
+    "total_vulnerabilities": 10,
+    "highest_severity": "CRITICAL",
+    "duration_seconds": 0.43,
+    "total_endpoints_scanned": 8
+  },
+  "findings": [
+    {
+      "id": "VULN-SEC-HDR-1790234756",
+      "title": "Missing Fundamental API Security Headers",
+      "category": "API8:2023 Security Misconfiguration",
+      "severity": "MEDIUM",
+      "cvss_score": 5.3,
+      "cwe": "CWE-693: Protection Mechanism Failure",
+      "endpoint": "/api/v1/health",
+      "method": "GET",
+      "description": "The API server responses do not include essential defensive HTTP headers, leaving clients exposed to clickjacking, MIME sniffing, and protocol downgrade attacks.",
+      "evidence": {
+        "missing_headers": [
+          "Strict-Transport-Security (Enforces HTTPS connections and prevents MITM attacks.)",
+          "X-Content-Type-Options (Prevents MIME-type sniffing (should be 'nosniff').)",
+          "X-Frame-Options (Mitigates Clickjacking attacks (should be 'DENY' or 'SAMEORIGIN').)",
+          "Content-Security-Policy (Restricts resource loading domains and mitigates XSS.)"
+        ],
+        "observed_headers": {
+          "date": "Thu, 24 Sep 2026 07:25:56 GMT",
+          "server": "uvicorn",
+          "content-length": "102",
+          "content-type": "application/json",
+          "vary": "Origin"
+        }
+      },
+      "poc_curl": "curl -I http://127.0.0.1:8001/api/v1/health",
+      "remediation": {
+        "advice": "Add a middleware to inject HSTS, X-Content-Type-Options, X-Frame-Options, and Content-Security-Policy headers on all outgoing responses.",
+        "code_python": "@app.middleware(\"http\")\nasync def add_security_headers(request: Request, call_next):\n    response = await call_next(request)\n    response.headers[\"X-Content-Type-Options\"] = \"nosniff\"\n    response.headers[\"X-Frame-Options\"] = \"DENY\"\n    response.headers[\"Strict-Transport-Security\"] = \"max-age=31536000; includeSubDomains\"\n    response.headers[\"Content-Security-Policy\"] = \"default-src 'none'; frame-ancestors 'none'\"\n    return response"
+      }
+    },
+    {
+      "id": "VULN-RATE-LIMIT-2",
+      "title": "Unrestricted Resource Consumption / Missing Rate Limiting on /api/v1/auth/login",
+      "category": "API4:2023 Unrestricted Resource Consumption",
+      "severity": "MEDIUM",
+      "cvss_score": 5.9,
+      "cwe": "CWE-770: Allocation of Resources Without Limits or Throttling",
+      "endpoint": "/api/v1/auth/login",
+      "method": "POST",
+      "description": "The endpoint sustained 15 rapid consecutive requests without triggering HTTP 429 (Too Many Requests) or providing standard rate-limiting headers. Susceptible to brute force and Denial of Service (DoS).",
+      "evidence": {
+        "burst_requests_sent": 15,
+        "unthrottled_responses": 15,
+        "rate_limit_headers_present": false
+      },
+      "poc_curl": "for i in {1..15}; do curl -s -o /dev/null -w '%{http_code}\\n' http://127.0.0.1:8001/api/v1/auth/login; done",
+      "remediation": {
+        "advice": "Implement token-bucket or sliding-window rate limiting on all public authentication and expensive computation endpoints (e.g. max 5 attempts/minute for login).",
+        "code_python": "from slowapi import Limiter, _rate_limit_exceeded_handler\nfrom slowapi.util import get_remote_address\n\nlimiter = Limiter(key_func=get_remote_address)\napp.state.limiter = limiter\n\n@app.post(\"/api/v1/auth/login\")\n@limiter.limit(\"5/minute\")\ndef login(request: Request, creds: LoginRequest):\n    return auth_service.authenticate(creds)"
+      }
+    },
+    {
+      "id": "VULN-BOLA-3",
+      "title": "Broken Object-Level Authorization (BOLA / IDOR) on /api/v1/patients/{patient_id}/records",
+      "category": "API1:2023 Broken Object Level Authorization",
+      "severity": "CRITICAL",
+      "cvss_score": 9.4,
+      "cwe": "CWE-639: Authorization Bypass Through User-Controlled Key",
+      "endpoint": "/api/v1/patients/{patient_id}/records",
+      "method": "GET",
+      "description": "The endpoint allows an authenticated user (Tenant Alice (Regular User)) to inspect or modify the confidential resources of another tenant (Tenant Bob (Victim / Target)) by simply changing the identifier in the URL path.",
+      "evidence": {
+        "tested_url": "http://127.0.0.1:8001/api/v1/patients/102/records",
+        "sent_token": "Bearer tok_alice_9981a",
+        "response_status": 200,
+        "leaked_object_sample": {
+          "patient_id": "102",
+          "patient_name": "Bob Miller",
+          "age": 42,
+          "blood_group": "O-",
+          "primary_physician": "Dr. Keith Vance",
+          "clinical_diagnosis": "Stage 2 Chronic Kidney Disease, Type 2 Diabetes Mellitus",
+          "confidential_notes": "Patient undergoing confidential psychiatric counselling for acute clinical depression.",
+          "prescriptions": [
+            "Metformin 500mg",
+            "Sertraline 50mg",
+            "Insulin Glargine 20u"
+          ],
+          "lab_reports": [
+            {
+              "date": "2026-07-20",
+              "test": "HbA1c",
+              "status": "Elevated (8.4%)"
+            },
+            {
+              "date": "2026-08-30",
+              "test": "eGFR",
+              "status": "Diminished (48 mL/min)"
+            }
+          ],
+          "insurance_policy_number": "INSR-BOB-334211-CA",
+          "emergency_contact": "+1-555-014-9981"
+        }
+      },
+      "poc_curl": "curl -X GET 'http://127.0.0.1:8001/api/v1/patients/102/records' \\\n  -H 'Authorization: Bearer tok_alice_9981a' \\\n  -H 'Accept: application/json'",
+      "remediation": {
+        "advice": "Implement strict Object-Level Access Control (ABAC/RBAC). Check if the requesting tenant owns the requested resource ID before querying database records.",
+        "code_python": "# SECURE PATTERN: Enforce Object Ownership Validation\n@app.get(\"/api/v1/patients/{patient_id}/records\")\ndef get_patient_records(patient_id: str, current_user = Depends(get_current_active_user)):\n    # 1. Verify object-level authorization against current session\n    if current_user.role != \"admin\" and current_user.patient_id != patient_id:\n        raise HTTPException(\n            status_code=status.HTTP_403_FORBIDDEN,\n            detail=\"Access Denied: You do not have permission to access this patient's medical records.\"\n        )\n    return db.get_patient_records(patient_id)"
+      }
+    },
+    {
+      "id": "VULN-BOLA-4",
+      "title": "Broken Object-Level Authorization (BOLA / IDOR) on /api/v1/orders/{order_id}",
+      "category": "API1:2023 Broken Object Level Authorization",
+      "severity": "CRITICAL",
+      "cvss_score": 9.4,
+      "cwe": "CWE-639: Authorization Bypass Through User-Controlled Key",
+      "endpoint": "/api/v1/orders/{order_id}",
+      "method": "GET",
+      "description": "The endpoint allows an authenticated user (Tenant Alice (Regular User)) to inspect or modify the confidential resources of another tenant (Tenant Bob (Victim / Target)) by simply changing the identifier in the URL path.",
+      "evidence": {
+        "tested_url": "http://127.0.0.1:8001/api/v1/orders/5002",
+        "sent_token": "Bearer tok_alice_9981a",
+        "response_status": 200,
+        "leaked_object_sample": {
+          "order_id": "5002",
+          "owner_id": "102",
+          "customer": "Bob Miller",
+          "amount": 1289.5,
+          "status": "Processing",
+          "items": [
+            "Continuous Glucose Monitoring Sensor (3-Month Supply)",
+            "Insulin Cool-Storage Bag"
+          ],
+          "payment_method": "MasterCard ending in 8819",
+          "billing_address": "404 Ocean Boulevard, Santa Monica, CA 90401"
+        }
+      },
+      "poc_curl": "curl -X GET 'http://127.0.0.1:8001/api/v1/orders/5002' \\\n  -H 'Authorization: Bearer tok_alice_9981a' \\\n  -H 'Accept: application/json'",
+      "remediation": {
+        "advice": "Implement strict Object-Level Access Control (ABAC/RBAC). Check if the requesting tenant owns the requested resource ID before querying database records.",
+        "code_python": "# SECURE PATTERN: Enforce Object Ownership Validation\n@app.get(\"/api/v1/patients/{patient_id}/records\")\ndef get_patient_records(patient_id: str, current_user = Depends(get_current_active_user)):\n    # 1. Verify object-level authorization against current session\n    if current_user.role != \"admin\" and current_user.patient_id != patient_id:\n        raise HTTPException(\n            status_code=status.HTTP_403_FORBIDDEN,\n            detail=\"Access Denied: You do not have permission to access this patient's medical records.\"\n        )\n    return db.get_patient_records(patient_id)"
+      }
+    },
+    {
+      "id": "VULN-BOLA-5",
+      "title": "Broken Object-Level Authorization (BOLA / IDOR) on /api/v1/users/{user_id}/profile",
+      "category": "API1:2023 Broken Object Level Authorization",
+      "severity": "CRITICAL",
+      "cvss_score": 9.4,
+      "cwe": "CWE-639: Authorization Bypass Through User-Controlled Key",
+      "endpoint": "/api/v1/users/{user_id}/profile",
+      "method": "GET",
+      "description": "The endpoint allows an authenticated user (Tenant Alice (Regular User)) to inspect or modify the confidential resources of another tenant (Tenant Bob (Victim / Target)) by simply changing the identifier in the URL path.",
+      "evidence": {
+        "tested_url": "http://127.0.0.1:8001/api/v1/users/102/profile",
+        "sent_token": "Bearer tok_alice_9981a",
+        "response_status": 200,
+        "leaked_object_sample": {
+          "id": "102",
+          "username": "bob_miller",
+          "email": "bob.m@example.com",
+          "full_name": "Bob Miller",
+          "token": "tok_bob_3342b",
+          "role": "user",
+          "password_hash": "$2b$12$K19z8Fq0Lp3Mm8Vx0Yv.Uu7hRt6yEq1WvBn3mK2lOp8sX",
+          "ssn": "581-22-3491",
+          "internal_auth_secret": "sk_live_sec_109284_prod_bm",
+          "salary_tier": "$98,000",
+          "is_superadmin": false,
+          "mfa_backup_codes": [
+            "1129-4402",
+            "5591-8823"
+          ]
+        }
+      },
+      "poc_curl": "curl -X GET 'http://127.0.0.1:8001/api/v1/users/102/profile' \\\n  -H 'Authorization: Bearer tok_alice_9981a' \\\n  -H 'Accept: application/json'",
+      "remediation": {
+        "advice": "Implement strict Object-Level Access Control (ABAC/RBAC). Check if the requesting tenant owns the requested resource ID before querying database records.",
+        "code_python": "# SECURE PATTERN: Enforce Object Ownership Validation\n@app.get(\"/api/v1/patients/{patient_id}/records\")\ndef get_patient_records(patient_id: str, current_user = Depends(get_current_active_user)):\n    # 1. Verify object-level authorization against current session\n    if current_user.role != \"admin\" and current_user.patient_id != patient_id:\n        raise HTTPException(\n            status_code=status.HTTP_403_FORBIDDEN,\n            detail=\"Access Denied: You do not have permission to access this patient's medical records.\"\n        )\n    return db.get_patient_records(patient_id)"
+      }
+    },
+    {
+      "id": "VULN-DATA-EXP-6",
+      "title": "Excessive Data Exposure & Sensitive PII Leakage on /api/v1/users/{user_id}/profile",
+      "category": "API3:2023 Broken Object Property Level Authorization",
+      "severity": "HIGH",
+      "cvss_score": 8.2,
+      "cwe": "CWE-200: Exposure of Sensitive Information to an Unauthorized Actor",
+      "endpoint": "/api/v1/users/{user_id}/profile",
+      "method": "GET",
+      "description": "The endpoint returns internal object properties and sensitive credentials in the response payload that should not be exposed to API consumers.",
+      "evidence": {
+        "tested_url": "http://127.0.0.1:8001/api/v1/users/101/profile",
+        "leaked_attributes": [
+          "Key 'internal_auth_secret' containing 'sk_live_sec_991823_prod_a...'",
+          "Key 'password_hash' containing '$2b$12$e8yO/3d2XG4XjQ7M0R...'",
+          "Social Security Number (SSN) detected: '452-88-9102...'",
+          "Live Secret API Key detected: 'sk_live_sec_991823_p...'",
+          "Key 'mfa_backup_codes' containing '['7712-9901', '8831-2290'...'",
+          "Key 'salary_tier' containing '$145,000'",
+          "Key 'ssn' containing '452-88-9102'"
+        ],
+        "response_payload_sample": {
+          "id": "101",
+          "username": "alice_walker",
+          "email": "alice.w@example.com",
+          "full_name": "Dr. Alice Walker",
+          "token": "tok_alice_9981a",
+          "role": "user",
+          "password_hash": "$2b$12$e8yO/3d2XG4XjQ7M0RzIue1bH29vKzLopQ9.g3nUv7xWp",
+          "ssn": "452-88-9102",
+          "internal_auth_secret": "sk_live_sec_991823_prod_ak",
+          "salary_tier": "$145,000",
+          "is_superadmin": false,
+          "mfa_backup_codes": [
+            "7712-9901",
+            "8831-2290"
+          ]
+        }
+      },
+      "poc_curl": "curl -X GET 'http://127.0.0.1:8001/api/v1/users/101/profile' \\\n  -H 'Authorization: Bearer tok_alice_9981a'",
+      "remediation": {
+        "advice": "Never return raw database entities. Use strict output Data Transfer Objects (Pydantic response models) with field allowlisting.",
+        "code_python": "# SECURE PATTERN: Enforce Explicit Data Transfer Objects (DTO)\nclass PublicUserProfileResponse(BaseModel):\n    id: str\n    username: str\n    email: EmailStr\n    full_name: str\n    # Sensitive attributes (password_hash, ssn, internal_auth_secret) are EXCLUDED\n\n@app.get(\"/api/v1/users/{user_id}/profile\", response_model=PublicUserProfileResponse)\ndef get_user_profile(user_id: str, current_user = Depends(get_current_active_user)):\n    user = db.get_user_by_id(user_id)\n    # FastAPI automatically filters out fields not declared in response_model\n    return user"
+      }
+    },
+    {
+      "id": "VULN-BOLA-7",
+      "title": "Broken Object-Level Authorization (BOLA / IDOR) on /api/v1/admin/users/{user_id}",
+      "category": "API1:2023 Broken Object Level Authorization",
+      "severity": "CRITICAL",
+      "cvss_score": 9.4,
+      "cwe": "CWE-639: Authorization Bypass Through User-Controlled Key",
+      "endpoint": "/api/v1/admin/users/{user_id}",
+      "method": "DELETE",
+      "description": "The endpoint allows an authenticated user (Tenant Alice (Regular User)) to inspect or modify the confidential resources of another tenant (Tenant Bob (Victim / Target)) by simply changing the identifier in the URL path.",
+      "evidence": {
+        "tested_url": "http://127.0.0.1:8001/api/v1/admin/users/102",
+        "sent_token": "Bearer tok_alice_9981a",
+        "response_status": 200,
+        "leaked_object_sample": {
+          "status": "success",
+          "message": "User ID 102 deleted successfully by admin action.",
+          "executed_by_token_holder": "alice_walker"
+        }
+      },
+      "poc_curl": "curl -X DELETE 'http://127.0.0.1:8001/api/v1/admin/users/102' \\\n  -H 'Authorization: Bearer tok_alice_9981a' \\\n  -H 'Accept: application/json'",
+      "remediation": {
+        "advice": "Implement strict Object-Level Access Control (ABAC/RBAC). Check if the requesting tenant owns the requested resource ID before querying database records.",
+        "code_python": "# SECURE PATTERN: Enforce Object Ownership Validation\n@app.get(\"/api/v1/patients/{patient_id}/records\")\ndef get_patient_records(patient_id: str, current_user = Depends(get_current_active_user)):\n    # 1. Verify object-level authorization against current session\n    if current_user.role != \"admin\" and current_user.patient_id != patient_id:\n        raise HTTPException(\n            status_code=status.HTTP_403_FORBIDDEN,\n            detail=\"Access Denied: You do not have permission to access this patient's medical records.\"\n        )\n    return db.get_patient_records(patient_id)"
+      }
+    },
+    {
+      "id": "VULN-BFLA-8",
+      "title": "Broken Function Level Authorization (BFLA / Privilege Escalation) on /api/v1/admin/users/{user_id}",
+      "category": "API5:2023 Broken Function Level Authorization",
+      "severity": "CRITICAL",
+      "cvss_score": 9.1,
+      "cwe": "CWE-285: Improper Authorization",
+      "endpoint": "/api/v1/admin/users/{user_id}",
+      "method": "DELETE",
+      "description": "Privileged administrative operation DELETE /api/v1/admin/users/{user_id} is accessible by standard, non-privileged user tokens without role verification.",
+      "evidence": {
+        "tested_url": "http://127.0.0.1:8001/api/v1/admin/users/102",
+        "used_role": "user (non-admin)",
+        "response_status": 200,
+        "response_body": "{\"status\":\"success\",\"message\":\"User ID 102 deleted successfully by admin action.\",\"executed_by_token_holder\":\"alice_walker\"}"
+      },
+      "poc_curl": "curl -X DELETE 'http://127.0.0.1:8001/api/v1/admin/users/102' \\\n  -H 'Authorization: Bearer tok_alice_9981a'",
+      "remediation": {
+        "advice": "Enforce centralized role-based access checks (RBAC) on all administrative routes using framework middleware or dependencies.",
+        "code_python": "# SECURE PATTERN: Enforce Role-Based Access Control (RBAC) Dependency\ndef require_admin_role(current_user = Depends(get_current_active_user)):\n    if current_user.role != \"admin\":\n        raise HTTPException(\n            status_code=status.HTTP_403_FORBIDDEN,\n            detail=\"Forbidden: Administrative privileges required to execute this operation.\"\n        )\n    return current_user\n\n@app.delete(\"/api/v1/admin/users/{user_id}\", dependencies=[Depends(require_admin_role)])\ndef delete_user_by_admin(user_id: str):\n    return db.delete_user(user_id)"
+      }
+    },
+    {
+      "id": "VULN-DATA-EXP-9",
+      "title": "Excessive Data Exposure & Sensitive PII Leakage on /api/v1/system/debug-logs",
+      "category": "API3:2023 Broken Object Property Level Authorization",
+      "severity": "HIGH",
+      "cvss_score": 8.2,
+      "cwe": "CWE-200: Exposure of Sensitive Information to an Unauthorized Actor",
+      "endpoint": "/api/v1/system/debug-logs",
+      "method": "GET",
+      "description": "The endpoint returns internal object properties and sensitive credentials in the response payload that should not be exposed to API consumers.",
+      "evidence": {
+        "tested_url": "http://127.0.0.1:8001/api/v1/system/debug-logs",
+        "leaked_attributes": [
+          "Database Connection String with Credentials detected: 'postgres://apex_admi...'",
+          "Redis Connection String with Password detected: 'redis://:ApeX_R3d1s_...'",
+          "Key 'database_uri' containing 'postgres://apex_admin:P@s...'"
+        ],
+        "response_payload_sample": {
+          "environment": "production-us-east-1",
+          "database_uri": "postgres://apex_admin:P@ssw0rd9912!@db-internal.apexhealth.net:5432/core_records",
+          "redis_cache": "redis://:ApeX_R3d1s_K3y@10.0.4.12:6379/0",
+          "aws_s3_bucket": "s3://apex-confidential-medical-backups-2026/",
+          "active_worker_threads": 16,
+          "debug_mode": true
+        }
+      },
+      "poc_curl": "curl -X GET 'http://127.0.0.1:8001/api/v1/system/debug-logs' \\\n  -H 'Authorization: Bearer tok_alice_9981a'",
+      "remediation": {
+        "advice": "Never return raw database entities. Use strict output Data Transfer Objects (Pydantic response models) with field allowlisting.",
+        "code_python": "# SECURE PATTERN: Enforce Explicit Data Transfer Objects (DTO)\nclass PublicUserProfileResponse(BaseModel):\n    id: str\n    username: str\n    email: EmailStr\n    full_name: str\n    # Sensitive attributes (password_hash, ssn, internal_auth_secret) are EXCLUDED\n\n@app.get(\"/api/v1/users/{user_id}/profile\", response_model=PublicUserProfileResponse)\ndef get_user_profile(user_id: str, current_user = Depends(get_current_active_user)):\n    user = db.get_user_by_id(user_id)\n    # FastAPI automatically filters out fields not declared in response_model\n    return user"
+      }
+    },
+    {
+      "id": "VULN-RATE-LIMIT-10",
+      "title": "Unrestricted Resource Consumption / Missing Rate Limiting on /api/v1/reports/export",
+      "category": "API4:2023 Unrestricted Resource Consumption",
+      "severity": "MEDIUM",
+      "cvss_score": 5.9,
+      "cwe": "CWE-770: Allocation of Resources Without Limits or Throttling",
+      "endpoint": "/api/v1/reports/export",
+      "method": "GET",
+      "description": "The endpoint sustained 15 rapid consecutive requests without triggering HTTP 429 (Too Many Requests) or providing standard rate-limiting headers. Susceptible to brute force and Denial of Service (DoS).",
+      "evidence": {
+        "burst_requests_sent": 15,
+        "unthrottled_responses": 15,
+        "rate_limit_headers_present": false
+      },
+      "poc_curl": "for i in {1..15}; do curl -s -o /dev/null -w '%{http_code}\\n' http://127.0.0.1:8001/api/v1/reports/export; done",
+      "remediation": {
+        "advice": "Implement token-bucket or sliding-window rate limiting on all public authentication and expensive computation endpoints (e.g. max 5 attempts/minute for login).",
+        "code_python": "from slowapi import Limiter, _rate_limit_exceeded_handler\nfrom slowapi.util import get_remote_address\n\nlimiter = Limiter(key_func=get_remote_address)\napp.state.limiter = limiter\n\n@app.post(\"/api/v1/auth/login\")\n@limiter.limit(\"5/minute\")\ndef login(request: Request, creds: LoginRequest):\n    return auth_service.authenticate(creds)"
+      }
+    }
+  ],
+  "logs": [
+    "[12:55:56] [*] Starting SentinelAPI Zero-Trust Scan against: http://127.0.0.1:8001",
+    "[12:55:56] [*] Parsing OpenAPI Specification (Version: 3.1.0)",
+    "[12:55:56] [*] Discovered 8 unique route path templates.",
+    "[12:55:56] [*] Probing API Gateway Security Headers and CORS Policy...",
+    "[12:55:56] [!] Warning: 4 critical security headers are missing from API gateway.",
+    "[12:55:56] [+] Auditing GET /api/v1/health (Operation: health_check_api_v1_health_get)",
+    "[12:55:57] [+] Auditing POST /api/v1/auth/login (Operation: login_api_v1_auth_login_post)",
+    "[12:55:57] [!] Warning: Missing rate limiting detected on POST /api/v1/auth/login.",
+    "[12:55:57] [+] Auditing GET /api/v1/patients/{patient_id}/records (Operation: get_patient_records_api_v1_patients__patient_id__records_get)",
+    "[12:55:57] [!!!] CRITICAL: BOLA / IDOR vulnerability verified on GET /api/v1/patients/{patient_id}/records!",
+    "[12:55:57] [+] Auditing GET /api/v1/orders/{order_id} (Operation: get_order_details_api_v1_orders__order_id__get)",
+    "[12:55:57] [!!!] CRITICAL: BOLA / IDOR vulnerability verified on GET /api/v1/orders/{order_id}!",
+    "[12:55:57] [+] Auditing GET /api/v1/users/{user_id}/profile (Operation: get_user_profile_api_v1_users__user_id__profile_get)",
+    "[12:55:57] [!!!] CRITICAL: BOLA / IDOR vulnerability verified on GET /api/v1/users/{user_id}/profile!",
+    "[12:55:57] [!] HIGH RISK: Excessive Data Exposure detected on GET /api/v1/users/{user_id}/profile!",
+    "[12:55:57] [+] Auditing DELETE /api/v1/admin/users/{user_id} (Operation: delete_user_by_admin_api_v1_admin_users__user_id__delete)",
+    "[12:55:57] [!!!] CRITICAL: BOLA / IDOR vulnerability verified on DELETE /api/v1/admin/users/{user_id}!",
+    "[12:55:57] [!!!] CRITICAL: Broken Function Level Authorization (BFLA) detected on DELETE /api/v1/admin/users/{user_id}!",
+    "[12:55:57] [+] Auditing GET /api/v1/system/debug-logs (Operation: get_debug_logs_api_v1_system_debug_logs_get)",
+    "[12:55:57] [!] HIGH RISK: Excessive Data Exposure detected on GET /api/v1/system/debug-logs!",
+    "[12:55:57] [+] Auditing GET /api/v1/reports/export (Operation: export_large_dataset_api_v1_reports_export_get)",
+    "[12:55:57] [!] Warning: Missing rate limiting detected on GET /api/v1/reports/export.",
+    "[12:55:57] [+] Scan completed in 0.43s. Found 10 security vulnerabilities."
+  ],
+  "spec_title": "Apex Health & Pay API",
+  "spec_version": "2.4.0",
+  "target_url": "http://127.0.0.1:8001",
+  "scanned_at": "2026-09-24 12:55:57",
+  "id": "SCAN-1790234757"
+}

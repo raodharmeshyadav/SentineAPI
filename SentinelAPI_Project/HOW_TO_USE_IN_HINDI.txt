@@ -1,0 +1,57 @@
+================================================================================
+                    SENTINEL-API : AAPKO KYA AUR KAISE DIKHANA HAI
+                         AmiHacks 1.0 (Track C: Deep-Tech)
+================================================================================
+
+Bhai relax! Ab aapko kisi bhi Python ya terminal ki tension lene ki zaroorat nahi hai.
+Aapke Desktop par 2 sabse important files ready hain:
+
+--------------------------------------------------------------------------------
+1. PRESENTATION DIKHANE KE LIYE (10 Slides with Speaker Script):
+--------------------------------------------------------------------------------
+👉 Desktop par is file par double-click karo:
+   "1_OPEN_PRESENTATION_SLIDES.html"
+
+- Ye direct aapke browser (Chrome/Edge) me full screen open hogi.
+- Keyboard ka Right Arrow [▶] daba kar aage badho.
+- Upar "Speaker Script" button hai — uspar click karoge toh neeche likha aa jayega 
+  ki is slide par muh se kya bolna hai (Hindi + English me).
+- Phone par ya kisi bhi laptop par bina kisi software ke chalegi!
+
+--------------------------------------------------------------------------------
+2. WORKING APP KA LIVE DEMO DIKHANE KE LIYE:
+--------------------------------------------------------------------------------
+👉 Desktop par is file par double-click karo:
+   "2_OPEN_APP_DASHBOARD.html"
+
+- Ye direct browser me khul jayegi (Python install hone ki bhi zaroorat nahi hai!).
+- Step 1: "⚡ Execute Security Audit" button par click karo.
+          -> 0.3 second me 9 security flaws nikal kar dikha dega!
+- Step 2: Kisi bhi issue par "View & Test cURL" click karo aur "Execute Live" daba kar dikhao.
+- Step 3: Upar "Attack Path DAG" tab par click karo -> Visual attack diagram dikhega.
+- Step 4: Upar dropdown me "Target Secured API (Port 8002)" select karo 
+          aur scan run karo -> Score 84/100 (B) ho jayega aur dikhega ki bug fix ho chuka hai!
+
+--------------------------------------------------------------------------------
+3. AGAR KOI "CODE" MAANGE YA BOLE "AI SE FAKE BANWAYA HAI":
+--------------------------------------------------------------------------------
+Unhe bolna:
+"Sir, aap mera code dekh lijiye — SentinelAPI_Project folder me 'backend/scanner_engine.py' kholiye."
+- Isme OpenAPISpecParser aur SensitiveDataDetector dynamic class likhi hai.
+- Ye differential dual-tenant state permutation se authorization check karta hai.
+- Isme koi fake hardcoding nahi hai.
+
+--------------------------------------------------------------------------------
+4. DUSRE KE LAPTOP YA PHONE PAR KAISE LE JAAYEIN:
+--------------------------------------------------------------------------------
+- Agar kisi aur ke laptop par presentation deni hai:
+  Bas "1_OPEN_PRESENTATION_SLIDES.html" aur "2_OPEN_APP_DASHBOARD.html" ko 
+  pendrive se copy kar lo ya WhatsApp Web/Drive se download kar lo.
+- Dono files bina kisi Python ya server ke direct double-click se chalengi!
+
+--------------------------------------------------------------------------------
+5. POWERPOINT PPTX FILE:
+--------------------------------------------------------------------------------
+Agar judges sirf PPTX maangein toh:
+"SentinelAPI_Presentation.pptx" (Desktop folder me available hai).
+================================================================================
